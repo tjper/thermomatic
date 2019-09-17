@@ -1,3 +1,3 @@
-module github.com/spin-org/thermomatic
+module github.com/tjper/thermomatic
 
 go 1.12

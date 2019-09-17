@@ -1,9 +1,13 @@
 package main
 
 import (
-	"github.com/spin-org/thermomatic/internal/common"
+	"log"
+
+	"github.com/tjper/thermomatic/internal/server"
 )
 
 func main() {
-	panic(common.ErrNotImplemented)
+	if err := server.Start(":1337"); err != nil {
+		log.Fatal(err)
+	}
 }
