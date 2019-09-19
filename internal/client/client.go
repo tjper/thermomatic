@@ -4,6 +4,7 @@ package client
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"time"
@@ -24,6 +25,7 @@ const (
 )
 
 // Client is a thermomatic client.
+// TODO: add way to stop client
 type Client struct {
 	net.Conn
 
@@ -80,5 +82,20 @@ func (c *Client) Login() error {
 
 // ProcessReadings process incoming "Reading" TCP messages for the Client.
 func (c Client) ProcessReadings() error {
-	return nil
+	b := make([]byte, 40)
+	var reading Reading
+	for {
+		_, err := io.ReadFull(c.Conn, b)
+		if err == io.EOF {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !reading.Decode(b) {
+			fmt.Printf("unable to decode b\tb = %s\n", b)
+			continue
+		}
+		fmt.Printf("reading = %v", reading)
+	}
 }

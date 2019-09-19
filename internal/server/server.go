@@ -13,6 +13,8 @@ import (
 )
 
 // Server is the thermomatic server.
+// TODO: add map of clients that can is concurrent access safe
+// TODO: improve client event and error logging, and server event logging
 type Server struct {
 	listener *net.TCPListener
 	stdErr   *log.Logger
