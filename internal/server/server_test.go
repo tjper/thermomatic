@@ -10,10 +10,23 @@ import (
 
 func TestStart(t *testing.T) {
 	tests := []struct {
-		Name string
-		Port int
+		Name     string
+		Port     int
+		Messages [][]byte
 	}{
-		{Name: "Connect", Port: 1337},
+		{
+			Name:     "Connect",
+			Port:     1337,
+			Messages: [][]byte{},
+		},
+		{
+			Name: "Login",
+			Port: 1337,
+			Messages: [][]byte{
+				[]byte("490sdfs154203237518"),
+				[]byte("lsdfogin"),
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -30,6 +43,12 @@ func TestStart(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer conn.Close()
+			for _, message := range test.Messages {
+				_, err := conn.Write(message)
+				if err != nil {
+					t.Fatalf("unexpected error = %s", err)
+				}
+			}
 		})
 	}
 }

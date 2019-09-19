@@ -8,6 +8,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/tjper/thermomatic/internal/client"
 )
 
 // Server is the thermomatic server.
@@ -80,8 +82,22 @@ func (srv *Server) Accept() {
 
 			handlers.Add(1)
 			go func(c net.Conn) {
+				defer handlers.Done()
 				defer c.Close()
-				handlers.Done()
+
+				client, err := client.New(c)
+				if err != nil {
+					srv.stdErr.Println(err)
+					return
+				}
+				if err := client.Login(); err != nil {
+					srv.stdErr.Println(err)
+					return
+				}
+				if err := client.ProcessReadings(); err != nil {
+					srv.stdErr.Println(err)
+					return
+				}
 			}(conn)
 		}
 	}
