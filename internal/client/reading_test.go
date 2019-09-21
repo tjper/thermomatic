@@ -69,10 +69,14 @@ func TestDecodeAllocations(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
+			b, err := test.Reading.Encode()
+			if err != nil {
+				t.Fatalf("unexpected error = %s\n", err)
+			}
 			avg := testing.AllocsPerRun(1000, func() {
-				_, err := test.Reading.Encode()
-				if err != nil {
-					t.Fatal(err)
+				ok := test.Reading.Decode(b)
+				if !ok {
+					t.Fatalf("expected Reading.Encode to succeed, ok = %v", ok)
 				}
 			})
 			if avg > 0 {
