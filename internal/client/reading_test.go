@@ -28,20 +28,20 @@ func TestDecode(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			b, err := test.Reading.Encode()
 			if err != nil {
-				t.Fatal(err)
+				t.Errorf("unexpected error = %s", err)
 			}
 			reading := client.Reading{}
-			if !reading.Decode(b) {
-				t.Fatal("expected Decode to succeed")
+			if err := reading.Decode(b); err != nil {
+				t.Errorf("unexpected error = %s", err)
 			}
 
 			expected := b
 			actual, err := reading.Encode()
 			if err != nil {
-				t.Fatalf("unexpected error = %s", err)
+				t.Errorf("unexpected error = %s", err)
 			}
 			if !bytes.Equal(expected, actual) {
-				t.Fatalf(
+				t.Errorf(
 					"expected = %v\nactual = %v\n",
 					test.Reading,
 					reading)
@@ -71,16 +71,15 @@ func TestDecodeAllocations(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			b, err := test.Reading.Encode()
 			if err != nil {
-				t.Fatalf("unexpected error = %s\n", err)
+				t.Errorf("unexpected error = %s\n", err)
 			}
 			avg := testing.AllocsPerRun(1000, func() {
-				ok := test.Reading.Decode(b)
-				if !ok {
-					t.Fatalf("expected Reading.Encode to succeed, ok = %v", ok)
+				if err := test.Reading.Decode(b); err != nil {
+					t.Errorf("unexpected error = %s\n", err)
 				}
 			})
 			if avg > 0 {
-				t.Fatalf("expected avg # of allocations to be 0, avg = %v", avg)
+				t.Errorf("expected avg # of allocations to be 0, avg = %v", avg)
 			}
 
 		})
@@ -107,7 +106,7 @@ func BenchmarkDecode1(b *testing.B) {
 	}
 	buf, err := r.Encode()
 	if err != nil {
-		b.Fatal(err)
+		b.Errorf("unexpected error = %s\n", err)
 	}
 
 	b.ResetTimer()

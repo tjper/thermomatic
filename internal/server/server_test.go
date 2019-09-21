@@ -1,4 +1,4 @@
-// +build integration
+// +build development
 
 package server
 
@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -145,28 +144,6 @@ func TestProcessReadings(t *testing.T) {
 					t.Errorf("unexpected error = %s\n", err)
 				}
 			}
-			conn.Close()
-			svr.Shutdown()
-
-			file := "testdata/" + test.Name + "/result.golden"
-			if *golden {
-				if err := ioutil.WriteFile(file, w.Bytes(), 0644); err != nil {
-					t.Errorf("unexpected error = %s\n", err)
-				}
-			}
-
-			expected, err := ioutil.ReadFile(file)
-			if err != nil {
-				t.Errorf("unexpected error = %s\n", err)
-			}
-
-			if !bytes.Equal(w.Bytes(), expected) {
-				t.Errorf(
-					"expected != actual\nexpected = %s\nactual = %s\n",
-					expected,
-					w.Bytes())
-			}
-
 		})
 	}
 }

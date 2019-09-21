@@ -38,10 +38,32 @@ func TestDecode(t *testing.T) {
 	}
 }
 
-// TODO: add allocation tests
-// func TestDecodeAllocations(t *testing.T) {
-// 	panic(common.ErrNotImplemented)
-// }
+func TestDecodeAllocations(t *testing.T) {
+	tests := []struct {
+		Name     string
+		Imei     []byte
+		Expected uint64
+	}{
+		{
+			Name:     "happy path",
+			Imei:     []byte("490154203237518"),
+			Expected: 490154203237518,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			avg := testing.AllocsPerRun(1000, func() {
+				if _, err := Decode(test.Imei); err != nil {
+					t.Fatalf("unexpected error = %s\n", err)
+				}
+			})
+			if avg > 0 {
+				t.Errorf("expected avg # of allocations to be 0, avg = %v", avg)
+			}
+		})
+	}
+}
 
 func TestDecodePanics(t *testing.T) {
 	tests := []struct {
