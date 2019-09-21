@@ -34,6 +34,7 @@ type Client struct {
 	imei       uint64
 	authorized bool
 	createdAt  time.Time
+	lastReadAt time.Time
 
 	logInfo  *log.Logger
 	logError *log.Logger
@@ -69,7 +70,26 @@ func New(conn net.Conn, options ...ClientOption) (*Client, error) {
 	for _, option := range options {
 		option(c)
 	}
+	go c.watchReadFrequency(500 * time.Millisecond)
+	c.logInfo.Println("Connection Established")
 	return c, nil
+}
+
+func (c Client) watchReadFrequency(checkRate time.Duration) {
+	ticker := time.NewTicker(checkRate)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stop:
+			c.Stop()
+			return
+		case <-ticker.C:
+			if time.Since(c.lastReadAt) < (2 * time.Second) {
+				return
+			}
+			c.Stop()
+		}
+	}
 }
 
 // ClientOption modifies a Client object. Typically used with New to initialize
@@ -103,27 +123,30 @@ func (c Client) IMEI() uint64 {
 func (c *Client) Login() error {
 	b := make([]byte, 5)
 	for {
-		_, err := io.ReadFull(c.Conn, b)
-		if err == io.EOF {
-			continue
+		select {
+		case <-time.After(time.Second):
+			c.Stop()
+			return ErrClientLoginWindowExpired
+		default:
+			_, err := io.ReadFull(c.Conn, b)
+			if err == io.EOF {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("failed to client.Login/ReadFull\tb = % x, err = %s", b, err)
+			}
+			if !bytes.Equal([]byte(login), b) {
+				return ErrClientUnauthorized
+			}
+			c.authorized = true
+			c.logInfo.Println("Logged-In")
+			return nil
 		}
-		if err != nil {
-			return err
-		}
-		break
 	}
-	if !bytes.Equal([]byte(login), b) {
-		return ErrClientUnauthorized
-	}
-	if time.Since(c.createdAt) > time.Second {
-		return ErrClientLoginWindowExpired
-	}
-	c.authorized = true
-	return nil
 }
 
 // ProcessReadings process incoming "Reading" TCP messages for the Client.
-func (c Client) ProcessReadings() error {
+func (c *Client) ProcessReadings() error {
 	b := make([]byte, 40)
 	var reading Reading
 	for {
@@ -138,7 +161,7 @@ func (c Client) ProcessReadings() error {
 				continue
 			}
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to client.ProcessReadings/ReadFull\tb = % x, err = %s", b, err)
 			}
 			if err := reading.Decode(b); err != nil {
 				c.logError.Printf(
@@ -151,6 +174,7 @@ func (c Client) ProcessReadings() error {
 				time.Now().UnixNano(),
 				c.IMEI(),
 				reading)
+			c.lastReadAt = time.Now()
 		}
 	}
 }
@@ -159,11 +183,12 @@ func (c Client) ProcessReadings() error {
 func (c Client) Shutdown() {
 	close(c.stop)
 	<-c.exited
-	c.logInfo.Println("Stopped")
 }
 
 // Stop ends the Clients processing and executes the appropriate cleanup tasks.
 func (c Client) Stop() {
+	c.logInfo.Println("Stopping...")
 	c.Close()
 	close(c.exited)
+	c.logInfo.Println("Stopped")
 }

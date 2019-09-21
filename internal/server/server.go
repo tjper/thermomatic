@@ -13,13 +13,18 @@ import (
 )
 
 // Server is the thermomatic server.
-// TODO: improve client event and error logging, and server event logging
-// TODO: drop client connections that fail to send a message once every two seconds
-// TODO: drop client connections that fail to send login message within 1 second of imei
-// TODO: drop client if imei is invalid
-// TODO: 2nd pass on bound checks
-// TODO: Log client connecting, logging in, disconnecting
-// TODO: 2nd pass on Server logging
+// TODO: XXX improve client event and error logging, and server event logging
+// TODO: XXX drop client connections that fail to send a message once every two seconds
+// TODO: XXX drop client connections that fail to send login message within 1 second of imei
+// TODO: XXX drop client if imei is invalid
+// TODO: XXX drop client from ClientMap on client disconnect
+// TODO: XXX 2nd pass on bound checks
+// TODO: XXX Log client connecting, logging in, disconnecting
+// TODO: XXX 2nd pass on Server logging
+// TODO: review code documentation and update accordingly
+// TODO: add ticker to Reading process to minimize unecessary spinning
+// TODO: devise strategy against resource exhaustion attacks
+// TODO: devise strategy for duplicate logins
 type Server struct {
 	listener  *net.TCPListener
 	logError  *log.Logger
@@ -115,6 +120,7 @@ func (srv *Server) Accept() {
 					return
 				}
 				srv.clientMap.Store(client.IMEI(), *client)
+				defer srv.clientMap.Delete(client.IMEI())
 
 				if err := client.Login(); err != nil {
 					srv.logError.Println(err)
