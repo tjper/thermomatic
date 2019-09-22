@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"log"
 	"net"
@@ -21,10 +22,10 @@ import (
 // TODO: XXX 2nd pass on bound checks
 // TODO: XXX Log client connecting, logging in, disconnecting
 // TODO: XXX 2nd pass on Server logging
-// TODO: review code documentation and update accordingly
-// TODO: add ticker to Reading process to minimize unecessary spinning
-// TODO: devise strategy against resource exhaustion attacks
-// TODO: devise strategy for duplicate logins
+// TODO: XXX review code documentation and update accordingly
+// TODO: XXX add ticker to Reading process to minimize unecessary spinning
+// TODO: XXX devise strategy against resource exhaustion attacks
+// TODO: XXX devise strategy for duplicate logins
 type Server struct {
 	listener  *net.TCPListener
 	logError  *log.Logger
@@ -53,8 +54,8 @@ func New(port int, options ...ServerOption) (*Server, error) {
 	srv := &Server{
 		listener:  l,
 		clientMap: client.NewClientMap(),
-		logError:  log.New(os.Stderr, "", 0),
-		logInfo:   log.New(os.Stdout, "", 0),
+		logError:  log.New(os.Stderr, "[Thermomatic ERROR] ", 0),
+		logInfo:   log.New(os.Stdout, "[Thermomatic INFO] ", 0),
 		stop:      make(chan struct{}),
 		exited:    make(chan struct{}),
 	}
@@ -79,7 +80,9 @@ func WithLoggerOutput(w io.Writer) ServerOption {
 	}
 }
 
-// Shutdown shuts down the thermomatic server.
+// Shutdown communicates to all thermomatic server processes that shutdown has
+// begun. Shutdown logs that shutdown has completed when server has been
+// completely shutdown.
 func (srv *Server) Shutdown() {
 	srv.logInfo.Printf(
 		"Shutting down Thermomatic server listening at %s\n",
@@ -89,13 +92,19 @@ func (srv *Server) Shutdown() {
 	srv.logInfo.Println("Finished shutting down Thermomatic server.")
 }
 
-// Accept accepts incoming TCP connections and processes their contents.
-func (srv *Server) Accept() {
+// ListenAndServe accepts incoming TCP connections, creates and manages
+// Clients, and processes the clients connection contents in a seperate
+// goroutine.
+func (srv *Server) ListenAndServe() {
 	srv.logInfo.Println("accepting TCP connections...")
+	ctx, cancel := context.WithCancel(context.Background())
+
 	for {
 		select {
 		case <-srv.stop:
-			srv.Stop()
+			srv.listener.Close()
+			cancel()
+			close(srv.exited)
 			return
 
 		default:
@@ -107,44 +116,33 @@ func (srv *Server) Accept() {
 				srv.logError.Println(err)
 				continue
 			}
-
-			go func(c net.Conn) {
+			go func(ctx context.Context, c net.Conn) {
 				defer c.Close()
 
-				client, err := client.New(c,
-					client.WithErrorLogger(srv.logError),
-					client.WithInfoLogger(srv.logInfo),
-				)
+				client, err := client.New(ctx, conn)
 				if err != nil {
 					srv.logError.Println(err)
+					return
+				}
+				defer client.Close()
+
+				if srv.clientMap.Exists(client.IMEI()) {
+					srv.logError.Printf("Client %d is already connected\n", client.IMEI())
 					return
 				}
 				srv.clientMap.Store(client.IMEI(), *client)
 				defer srv.clientMap.Delete(client.IMEI())
 
-				if err := client.Login(); err != nil {
+				if err := client.ProcessLogin(ctx); err != nil {
 					srv.logError.Println(err)
 					return
 				}
 
-				if err := client.ProcessReadings(); err != nil {
+				if err := client.ProcessReadings(ctx); err != nil {
 					srv.logError.Println(err)
 					return
 				}
-			}(conn)
+			}(ctx, conn)
 		}
 	}
-}
-
-func (srv *Server) Stop() {
-	srv.listener.Close()
-	srv.logInfo.Println("Closed Listener.")
-
-	srv.clientMap.Range(func(_ uint64, c client.Client) bool {
-		c.Shutdown()
-		return true
-	})
-	srv.logInfo.Println("Closed Clients.")
-
-	close(srv.exited)
 }

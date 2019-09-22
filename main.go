@@ -19,7 +19,7 @@ func main() {
 	}
 	defer svr.Shutdown()
 
-	go svr.Accept()
+	go svr.ListenAndServe()
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)

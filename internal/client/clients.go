@@ -50,3 +50,12 @@ func (m *ClientMap) Range(f func(uint64, Client) bool) {
 	}
 	m.RUnlock()
 }
+
+// Exists checks to see if the IMEI exists within the ClientMap and returns its
+// existence.
+func (m *ClientMap) Exists(imei uint64) bool {
+	m.RLock()
+	_, ok := m.m[imei]
+	m.RUnlock()
+	return ok
+}

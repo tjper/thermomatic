@@ -39,7 +39,7 @@ func TestLogin(t *testing.T) {
 				t.Errorf("unexpected error = %s\n", err)
 			}
 			defer svr.Shutdown()
-			go svr.Accept()
+			go svr.ListenAndServe()
 
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(test.Port))
 			if err != nil {
@@ -80,7 +80,7 @@ func TestProcessReading(t *testing.T) {
 				t.Errorf("unexpected error = %s\n", err)
 			}
 			defer svr.Shutdown()
-			go svr.Accept()
+			go svr.ListenAndServe()
 
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(test.Port))
 			if err != nil {
@@ -131,7 +131,7 @@ func TestProcessReadings(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error = %s\n", err)
 			}
-			go svr.Accept()
+			go svr.ListenAndServe()
 
 			conn, err := net.Dial("tcp", ":"+strconv.Itoa(test.Port))
 			if err != nil {
