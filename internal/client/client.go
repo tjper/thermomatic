@@ -37,7 +37,6 @@ type Client struct {
 	net.Conn
 
 	imei        common.Uint64Holder
-	bucket      common.Uint64Holder
 	createdAt   common.TimeHolder
 	lastReadAt  common.TimeHolder
 	lastReading ReadingHolder
@@ -54,8 +53,8 @@ type Client struct {
 // a Client reference, and a nil error is returned. On failure a nil Client
 // reference, and an error is returned.
 func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, error) {
-	if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
-		return nil, fmt.Errorf("failed to Client.New/SetDeadline\terr = %s", err)
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		return nil, fmt.Errorf("failed to client.New/SetReadDeadline\terr = %s", err)
 	}
 
 	b := make([]byte, 15)
@@ -70,24 +69,21 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 	c := &Client{
 		Conn:        conn,
 		imei:        common.NewUint64Holder(imei),
-		bucket:      common.NewUint64Holder(0),
 		createdAt:   common.NewTimeHolder(time.Now()),
 		lastReadAt:  common.NewTimeHolder(time.Now()),
 		lastReading: NewReadingHolder(Reading{}),
 		logReading:  LogReadingWithUnixNano,
 
-		logInfo:  log.New(os.Stdout, "", 0),
-		logError: log.New(os.Stderr, "", 0),
+		logInfo:  log.New(os.Stdout, "", log.LstdFlags),
+		logError: log.New(os.Stderr, "", log.LstdFlags),
 
-		toShutdown: make(chan struct{}, 5),
+		toShutdown: make(chan struct{}, 7),
 		done:       make(chan struct{}),
 	}
 
 	for _, option := range options {
 		option(c)
 	}
-	go c.watchReadFrequency(ctx, 500*time.Millisecond)
-	go c.bucketIncrementer(ctx, 20*time.Millisecond, 10)
 	go c.moderator()
 
 	c.logInfo.Printf("[IMEI %d] Connection Established\n", c.IMEI())
@@ -110,46 +106,6 @@ func LogReadingWithUnixNano(logger *log.Logger, imei uint64, reading Reading) {
 	logger.Printf("%d,%d,%s\n", time.Now().UnixNano(), imei, reading)
 }
 
-// bucketIncrementer increments the workloadBalance field by 1 at the
-// rate passed as long as the balance is below max.
-func (c Client) bucketIncrementer(ctx context.Context, rate time.Duration, max uint64) {
-	ticker := time.NewTicker(rate)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
-		case <-ticker.C:
-			if v := c.bucket.Get(); v < max {
-				c.bucket.Set(v + 1)
-			}
-		}
-	}
-}
-
-// watchReadFrequency ensures that a Reading has occurred within the last 2
-// seconds, or the Client connection is closed.
-func (c Client) watchReadFrequency(ctx context.Context, checkRate time.Duration) {
-	ticker := time.NewTicker(checkRate)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
-		case <-ticker.C:
-			if time.Since(c.lastReadAt.Get()) > (2 * time.Second) {
-				c.logError.Printf("[IMEI %d] No Readings for 2 seconds, Closing Client\n", c.IMEI())
-				c.shutdown()
-				return
-			}
-		}
-	}
-}
-
 // toClose releases all Client sub-processes and resources.
 func (c Client) shutdown() {
 	c.toShutdown <- struct{}{}
@@ -169,16 +125,9 @@ func (c Client) LastReading() Reading {
 // following IMEI message, has a "login" payload. On success, a nil error is
 // returned. On failure, a non-nil error is returned.
 func (c Client) ProcessLogin(ctx context.Context) error {
-	timeout := time.NewTimer(time.Second)
-	defer timeout.Stop()
-
 	b := make([]byte, 5)
 	for {
 		select {
-		case <-timeout.C:
-			c.logError.Printf("[IMEI %d] Login Window Expired\n", c.IMEI())
-			c.shutdown()
-			return ErrClientLoginWindowExpired
 		case <-ctx.Done():
 			return ErrClientClose
 		case <-c.done:
@@ -186,15 +135,22 @@ func (c Client) ProcessLogin(ctx context.Context) error {
 		default:
 			_, err := io.ReadFull(c.Conn, b)
 			if err, ok := err.(net.Error); ok && err.Timeout() {
-				continue
+				c.logError.Printf("[IMEI %d] Login Window Expired\n", c.IMEI())
+				c.shutdown()
+				return ErrClientLoginWindowExpired
 			}
 			if err == io.EOF {
 				continue
 			}
 			if err != nil {
 				c.shutdown()
-				return fmt.Errorf("[IMEI %d] failed to client.Login/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
+				return fmt.Errorf("[IMEI %d] failed to client.ProcessLogin/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
 			}
+			if err := c.Conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				c.shutdown()
+				return fmt.Errorf("[IMEI %d] failed to client.ProcessLogin/SetReadDeadline\terr = %s", c.IMEI(), err)
+			}
+
 			if !bytes.Equal([]byte(login), b) {
 				c.shutdown()
 				return ErrClientUnauthorized
@@ -207,22 +163,34 @@ func (c Client) ProcessLogin(ctx context.Context) error {
 
 // ProcessReadings process incoming "Reading" TCP messages for the Client.
 func (c Client) ProcessReadings(ctx context.Context) error {
+	read := time.NewTicker(time.Duration(25 * time.Millisecond))
+	defer read.Stop()
+
 	b := make([]byte, 40)
 	var reading Reading
 	for {
+		select {
+		case <-c.done:
+			return ErrClientClose
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return ErrClientClose
+		default:
+		}
+
 		select {
 		case <-ctx.Done():
 			return ErrClientClose
 		case <-c.done:
 			return ErrClientClose
-		default:
-			if c.bucket.Get() == 0 {
-				continue
-			}
-
+		case <-read.C:
 			_, err := io.ReadFull(c.Conn, b)
 			if err, ok := err.(net.Error); ok && err.Timeout() {
-				continue
+				c.logError.Printf("[IMEI %d] No Readings for 2 seconds, Closing Client\n", c.IMEI())
+				c.shutdown()
+				return nil
 			}
 			if err == io.EOF {
 				continue
@@ -231,7 +199,10 @@ func (c Client) ProcessReadings(ctx context.Context) error {
 				c.shutdown()
 				return fmt.Errorf("[IMEI %d] failed to client.ProcessReadings/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
 			}
-			c.bucket.Decrement()
+			if err := c.Conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				c.shutdown()
+				return fmt.Errorf("[IMEI %d] failed to client.ProcessReadings/SetReadDeadline\terr = %s", c.IMEI(), err)
+			}
 
 			if err := reading.Decode(b); err != nil {
 				c.logError.Printf(
@@ -259,6 +230,15 @@ func WithLoggerOutput(w io.Writer) ClientOption {
 	return func(c *Client) {
 		c.logError.SetOutput(w)
 		c.logInfo.SetOutput(w)
+	}
+}
+
+// WithLoggerFlags returns a ClientOption that sets the Client's loggers flags
+// to the flags passed.
+func WithLoggerFlags(flags int) ClientOption {
+	return func(c *Client) {
+		c.logError.SetFlags(flags)
+		c.logInfo.SetFlags(flags)
 	}
 }
 

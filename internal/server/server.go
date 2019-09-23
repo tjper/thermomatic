@@ -42,16 +42,13 @@ func New(port int, options ...ServerOption) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := l.SetDeadline(time.Now().Add(time.Second)); err != nil {
-		return nil, err
-	}
 
 	srv := &Server{
 		listener:      l,
 		clientMap:     client.NewClientMap(),
 		clientOptions: make([]client.ClientOption, 0),
-		logError:      log.New(os.Stderr, "[Thermomatic ERROR] ", 0),
-		logInfo:       log.New(os.Stdout, "[Thermomatic INFO] ", 0),
+		logError:      log.New(os.Stderr, "[Thermomatic ERROR] ", log.LstdFlags),
+		logInfo:       log.New(os.Stdout, "[Thermomatic INFO] ", log.LstdFlags),
 		stop:          make(chan struct{}),
 		exited:        make(chan struct{}),
 	}
@@ -74,6 +71,15 @@ func WithLoggerOutput(w io.Writer) ServerOption {
 		srv.logError.SetOutput(w)
 		srv.logInfo.SetOutput(w)
 		srv.clientOptions = append(srv.clientOptions, client.WithLoggerOutput(w))
+	}
+}
+
+// WithLoggerFlags returns a ServerOption function that configures the Server's
+// loggers to to used the flags passed.
+func WithLoggerFlags(flags int) ServerOption {
+	return func(srv *Server) {
+		srv.logError.SetFlags(flags)
+		srv.logInfo.SetFlags(flags)
 	}
 }
 
@@ -134,6 +140,10 @@ func (srv *Server) ListenAndServe() {
 			return
 
 		default:
+			if err := srv.listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+				srv.logError.Println(err)
+				continue
+			}
 			conn, err := srv.listener.Accept()
 			if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 				continue

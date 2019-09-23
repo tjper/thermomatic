@@ -2,5 +2,6 @@
 [Thermomatic INFO] accepting TCP connections...
 [IMEI 490154203237518] Connection Established
 [IMEI 490154203237518] Logged-In
-490154203237518,67.77,2.63555,33.41,44.4,0.25666
+[IMEI 457026071135621] Connection Established
+[IMEI 457026071135621] Logged-In
 [IMEI 490154203237518] No Readings for 2 seconds, Closing Client

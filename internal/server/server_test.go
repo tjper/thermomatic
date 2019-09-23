@@ -44,6 +44,8 @@ func TestLogin(t *testing.T) {
 			svr, err := New(
 				test.Port,
 				WithLoggerOutput(w),
+				WithLoggerFlags(0),
+				WithClientOptions(client.WithLoggerFlags(0)),
 			)
 			if err != nil {
 				t.Errorf("unexpected error = %s\n", err)
@@ -68,6 +70,80 @@ func TestLogin(t *testing.T) {
 			isGolden(t, w.Bytes())
 		})
 	}
+}
+
+func TestMultiConnections(t *testing.T) {
+	tests := []struct {
+		Name            string
+		Port            int
+		Client1Messages [][]byte
+		Client2Messages [][]byte
+	}{
+		{
+			Name: "Two Connections",
+			Port: 1337,
+			Client1Messages: [][]byte{
+				[]byte("490154203237518"),
+				[]byte("login"),
+			},
+			Client2Messages: [][]byte{
+				[]byte("457026071135621"),
+				[]byte("login"),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			w := newSafeWriter()
+			svr, err := New(
+				test.Port,
+				WithLoggerOutput(w),
+				WithLoggerFlags(0),
+				WithClientOptions(client.WithLoggerFlags(0)),
+			)
+			if err != nil {
+				t.Errorf("unexpected error = %s\n", err)
+			}
+			defer svr.Shutdown()
+			go svr.ListenAndServe()
+
+			go func() {
+				conn, err := net.Dial("tcp", ":"+strconv.Itoa(test.Port))
+				if err != nil {
+					t.Errorf("unexpected error = %s\n", err)
+				}
+				defer conn.Close()
+
+				for _, message := range test.Client1Messages {
+					_, err := conn.Write(message)
+					if err != nil {
+						t.Errorf("unexpected error = %s\n", err)
+					}
+				}
+			}()
+			time.Sleep(1500 * time.Millisecond)
+
+			go func() {
+				conn, err := net.Dial("tcp", ":"+strconv.Itoa(test.Port))
+				if err != nil {
+					t.Errorf("unexpected error = %s\n", err)
+				}
+				defer conn.Close()
+
+				for _, message := range test.Client2Messages {
+					_, err := conn.Write(message)
+					if err != nil {
+						t.Errorf("unexpected error = %s\n", err)
+					}
+				}
+			}()
+			time.Sleep(1500 * time.Millisecond)
+
+			isGolden(t, w.Bytes())
+		})
+	}
+
 }
 
 func TestLoginWindowExpired(t *testing.T) {
@@ -99,6 +175,8 @@ func TestLoginWindowExpired(t *testing.T) {
 			svr, err := New(
 				test.Port,
 				WithLoggerOutput(w),
+				WithLoggerFlags(0),
+				WithClientOptions(client.WithLoggerFlags(0)),
 			)
 			if err != nil {
 				t.Errorf("unexpected error = %s\n", err)
@@ -151,8 +229,10 @@ func TestNoMessageForTwoSeconds(t *testing.T) {
 			svr, err := New(
 				test.Port,
 				WithLoggerOutput(w),
+				WithLoggerFlags(0),
 				WithClientOptions(
 					client.WithLogReading(client.LogReading),
+					client.WithLoggerFlags(0),
 				),
 			)
 			if err != nil {
@@ -208,8 +288,10 @@ func TestProcessReadings(t *testing.T) {
 			svr, err := New(
 				test.Port,
 				WithLoggerOutput(w),
+				WithLoggerFlags(0),
 				WithClientOptions(
 					client.WithLogReading(client.LogReading),
+					client.WithLoggerFlags(0),
 				),
 			)
 			if err != nil {
@@ -224,13 +306,13 @@ func TestProcessReadings(t *testing.T) {
 			}
 			defer conn.Close()
 
-			for _, message := range test.Messages {
-				_, err := conn.Write([]byte(message))
+			for i := range test.Messages {
+				_, err := conn.Write(test.Messages[i])
 				if err != nil {
 					t.Errorf("unexpected error = %s\n", err)
 				}
 			}
-			time.Sleep(2 * time.Second)
+			time.Sleep(5 * time.Second)
 
 			isGolden(t, w.Bytes())
 		})
@@ -260,6 +342,7 @@ func TestLastReading(t *testing.T) {
 			svr, err := New(
 				test.Port,
 				WithLoggerOutput(w),
+				WithLoggerFlags(0),
 				WithHttpServer(test.HttpPort),
 			)
 			if err != nil {
@@ -335,6 +418,7 @@ func TestImeiStatus(t *testing.T) {
 			svr, err := New(
 				test.Port,
 				WithLoggerOutput(w),
+				WithLoggerFlags(0),
 				WithHttpServer(test.HttpPort),
 			)
 			if err != nil {
