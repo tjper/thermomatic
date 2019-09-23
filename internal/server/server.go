@@ -4,10 +4,13 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/tjper/thermomatic/internal/client"
@@ -26,11 +29,20 @@ import (
 // TODO: XXX add ticker to Reading process to minimize unecessary spinning
 // TODO: XXX devise strategy against resource exhaustion attacks
 // TODO: XXX devise strategy for duplicate logins
+// TODO: change server tests into golden tests where possible
+// TODO: add golden tests for the various http endpoints
+// TODO: add http endpoint for client most recent reading
+// TODO: add http endpoint that reports if a device is online
+// TODO: add http status endpoint that reports the server stats
 type Server struct {
-	listener  *net.TCPListener
-	logError  *log.Logger
-	logInfo   *log.Logger
-	clientMap *client.ClientMap
+	listener   *net.TCPListener
+	httpServer http.Server
+
+	clientMap     *client.ClientMap
+	clientOptions []client.ClientOption
+
+	logError *log.Logger
+	logInfo  *log.Logger
 
 	stop   chan struct{}
 	exited chan struct{}
@@ -52,12 +64,13 @@ func New(port int, options ...ServerOption) (*Server, error) {
 	}
 
 	srv := &Server{
-		listener:  l,
-		clientMap: client.NewClientMap(),
-		logError:  log.New(os.Stderr, "[Thermomatic ERROR] ", 0),
-		logInfo:   log.New(os.Stdout, "[Thermomatic INFO] ", 0),
-		stop:      make(chan struct{}),
-		exited:    make(chan struct{}),
+		listener:      l,
+		clientMap:     client.NewClientMap(),
+		clientOptions: make([]client.ClientOption, 0),
+		logError:      log.New(os.Stderr, "[Thermomatic ERROR] ", 0),
+		logInfo:       log.New(os.Stdout, "[Thermomatic INFO] ", 0),
+		stop:          make(chan struct{}),
+		exited:        make(chan struct{}),
 	}
 	for _, option := range options {
 		option(srv)
@@ -77,6 +90,29 @@ func WithLoggerOutput(w io.Writer) ServerOption {
 	return func(srv *Server) {
 		srv.logError.SetOutput(w)
 		srv.logInfo.SetOutput(w)
+		srv.clientOptions = append(srv.clientOptions, client.WithLoggerOutput(w))
+	}
+}
+
+// WithClientOptions returns a ServerOption function that configures the Server
+// to utilize a set of ClientOptions for each Client object.
+func WithClientOptions(options ...client.ClientOption) ServerOption {
+	return func(srv *Server) {
+		srv.clientOptions = append(srv.clientOptions, options...)
+	}
+}
+
+// WithHttpServer returns a ServerOption function that initializes and starts
+// an http server.
+func WithHttpServer(port int) ServerOption {
+	return func(srv *Server) {
+		go func() {
+			srv.httpServer = http.Server{
+				Addr:    fmt.Sprintf(":%d", port),
+				Handler: srv.router(),
+			}
+			srv.logError.Println(srv.httpServer.ListenAndServe())
+		}()
 	}
 }
 
@@ -87,6 +123,11 @@ func (srv *Server) Shutdown() {
 	srv.logInfo.Printf(
 		"Shutting down Thermomatic server listening at %s\n",
 		srv.listener.Addr())
+
+	if err := srv.httpServer.Shutdown(context.Background()); err != nil {
+		srv.logError.Println(err)
+	}
+
 	close(srv.stop)
 	<-srv.exited
 	srv.logInfo.Println("Finished shutting down Thermomatic server.")
@@ -99,11 +140,13 @@ func (srv *Server) ListenAndServe() {
 	srv.logInfo.Println("accepting TCP connections...")
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var subProcesses sync.WaitGroup
 	for {
 		select {
 		case <-srv.stop:
 			srv.listener.Close()
 			cancel()
+			subProcesses.Wait()
 			close(srv.exited)
 			return
 
@@ -116,10 +159,12 @@ func (srv *Server) ListenAndServe() {
 				srv.logError.Println(err)
 				continue
 			}
+			subProcesses.Add(1)
 			go func(ctx context.Context, c net.Conn) {
+				defer subProcesses.Done()
 				defer c.Close()
 
-				client, err := client.New(ctx, conn)
+				client, err := client.New(ctx, conn, srv.clientOptions...)
 				if err != nil {
 					srv.logError.Println(err)
 					return
@@ -130,16 +175,16 @@ func (srv *Server) ListenAndServe() {
 					srv.logError.Printf("Client %d is already connected\n", client.IMEI())
 					return
 				}
-				srv.clientMap.Store(client.IMEI(), *client)
+				srv.clientMap.Store(client.IMEI(), client)
 				defer srv.clientMap.Delete(client.IMEI())
 
 				if err := client.ProcessLogin(ctx); err != nil {
-					srv.logError.Println(err)
+					srv.logError.Printf("failed to ProcessLogin\terr = %s\n", err)
 					return
 				}
 
 				if err := client.ProcessReadings(ctx); err != nil {
-					srv.logError.Println(err)
+					srv.logError.Printf("failed to ProcessReadings\terr = %s\n", err)
 					return
 				}
 			}(ctx, conn)
