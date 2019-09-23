@@ -20,14 +20,6 @@ import (
 	"github.com/tjper/thermomatic/internal/client"
 )
 
-// TODO: XXX golden test login
-// TODO: XXX golden test did not login within second if IMEI
-// TODO: XXX golden test no message in two seconds, connection closed
-// TODO: XXX golden test 10 sent readings
-// TODO: XXX golden test 1000 readings
-// TODO: XXX golden test 10 sent readings, correct last reading
-// TODO: XXX golden test online IMEI
-// TODO: XXX golden test offline IMEI
 var golden = flag.Bool("golden", false, "overwrite *.golden files for golden file tests")
 
 func TestLogin(t *testing.T) {

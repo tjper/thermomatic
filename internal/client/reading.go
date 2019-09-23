@@ -30,8 +30,6 @@ type Reading struct {
 //
 // Decode does NOT allocate under any condition. Additionally, it panics if b
 // isn't at least 40 bytes long.
-// TODO: convert error return value to bool if there is a large performance
-// benefit
 func (r *Reading) Decode(b []byte) error {
 	if len(b) < 40 {
 		panic("invalid payload, too short")

@@ -17,23 +17,6 @@ import (
 )
 
 // Server is the thermomatic server.
-// TODO: XXX improve client event and error logging, and server event logging
-// TODO: XXX drop client connections that fail to send a message once every two seconds
-// TODO: XXX drop client connections that fail to send login message within 1 second of imei
-// TODO: XXX drop client if imei is invalid
-// TODO: XXX drop client from ClientMap on client disconnect
-// TODO: XXX 2nd pass on bound checks
-// TODO: XXX Log client connecting, logging in, disconnecting
-// TODO: XXX 2nd pass on Server logging
-// TODO: XXX review code documentation and update accordingly
-// TODO: XXX add ticker to Reading process to minimize unecessary spinning
-// TODO: XXX devise strategy against resource exhaustion attacks
-// TODO: XXX devise strategy for duplicate logins
-// TODO: change server tests into golden tests where possible
-// TODO: add golden tests for the various http endpoints
-// TODO: add http endpoint for client most recent reading
-// TODO: add http endpoint that reports if a device is online
-// TODO: add http status endpoint that reports the server stats
 type Server struct {
 	listener   *net.TCPListener
 	httpServer http.Server

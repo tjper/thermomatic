@@ -1,4 +1,5 @@
-// TODO: document package.
+// Package client provides a library to initialize and manage a Client. A
+// Client is a TCP connection managed by the Thermomatic server.
 package client
 
 import (
