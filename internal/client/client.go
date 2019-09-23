@@ -34,14 +34,13 @@ const (
 
 // Client is a thermomatic client.
 type Client struct {
-	sync.RWMutex
 	net.Conn
 
-	imei        uint64
-	bucket      uint64
-	createdAt   time.Time
-	lastReadAt  time.Time
-	lastReading Reading
+	imei        safeUint64
+	bucket      safeUint64
+	createdAt   safeTime
+	lastReadAt  safeTime
+	lastReading safeReading
 	logReading  logReadingFunc
 
 	logInfo  *log.Logger
@@ -71,9 +70,9 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 
 	c := &Client{
 		Conn:       conn,
-		imei:       imei,
-		createdAt:  time.Now(),
-		lastReadAt: time.Now(),
+		imei:       safeUint64{val: imei},
+		createdAt:  safeTime{val: time.Now()},
+		lastReadAt: safeTime{val: time.Now()},
 		logReading: LogReadingWithUnixNano,
 
 		logInfo:  log.New(os.Stdout, "", 0),
@@ -122,11 +121,9 @@ func (c *Client) bucketIncrementer(ctx context.Context, rate time.Duration, max 
 		case <-c.done:
 			return
 		case <-ticker.C:
-			c.Lock()
-			if c.bucket < max {
-				c.bucket++
+			if v := c.bucket.get(); v < max {
+				c.bucket.set(v + 1)
 			}
-			c.Unlock()
 		}
 	}
 }
@@ -143,10 +140,7 @@ func (c *Client) watchReadFrequency(ctx context.Context, checkRate time.Duration
 		case <-c.done:
 			return
 		case <-ticker.C:
-			c.RLock()
-			lastReadAt := c.lastReadAt
-			c.RUnlock()
-			if time.Since(lastReadAt) > (2 * time.Second) {
+			if time.Since(c.lastReadAt.get()) > (2 * time.Second) {
 				c.logError.Printf("[IMEI %d] No Readings for 2 seconds, Closing Client\n", c.IMEI())
 				c.Close()
 				return
@@ -162,18 +156,14 @@ func (c *Client) Close() {
 	})
 }
 
-// IMEI is a getter for the Client.IMEI field
+// IMEI is a getter for the client's IMEI.
 func (c *Client) IMEI() uint64 {
-	c.RLock()
-	defer c.RUnlock()
-	return c.imei
+	return c.imei.get()
 }
 
 // LastReading is a getter for the Client's most recent reading.
 func (c *Client) LastReading() Reading {
-	c.RLock()
-	defer c.RUnlock()
-	return c.lastReading
+	return c.lastReading.get()
 }
 
 // ProcessLogin authorizes the Client connection by ensuring TCP message
@@ -224,10 +214,7 @@ func (c *Client) ProcessReadings(ctx context.Context) error {
 		case <-c.done:
 			return ErrClientClose
 		default:
-			c.RLock()
-			balance := c.bucket
-			c.RUnlock()
-			if balance == 0 {
+			if c.bucket.get() == 0 {
 				continue
 			}
 
@@ -241,25 +228,20 @@ func (c *Client) ProcessReadings(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("[IMEI %d] failed to client.ProcessReadings/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
 			}
-
-			c.Lock()
-			c.bucket--
-			c.Unlock()
+			c.bucket.decrement()
 
 			if err := reading.Decode(b); err != nil {
 				c.logError.Printf(
 					"[IMEI %d] Failed to Client.ProcessReadings/decode\t b = %x, err = %s\n",
-					c.IMEI(),
+					c.imei.get(),
 					b,
 					err)
 				continue
 			}
 
-			c.logReading(c.logError, c.IMEI(), reading)
-			c.Lock()
-			c.lastReadAt = time.Now()
-			c.lastReading = reading
-			c.Unlock()
+			c.logReading(c.logError, c.imei.get(), reading)
+			c.lastReadAt.set(time.Now())
+			c.lastReading.set(reading)
 		}
 	}
 }
