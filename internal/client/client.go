@@ -35,11 +35,11 @@ const (
 type Client struct {
 	net.Conn
 
-	imei        safeUint64
-	bucket      safeUint64
-	createdAt   safeTime
-	lastReadAt  safeTime
-	lastReading safeReading
+	imei        *safeUint64
+	bucket      *safeUint64
+	createdAt   *safeTime
+	lastReadAt  *safeTime
+	lastReading *safeReading
 	logReading  logReadingFunc
 
 	logInfo  *log.Logger
@@ -67,11 +67,13 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 	}
 
 	c := &Client{
-		Conn:       conn,
-		imei:       safeUint64{val: imei},
-		createdAt:  safeTime{val: time.Now()},
-		lastReadAt: safeTime{val: time.Now()},
-		logReading: LogReadingWithUnixNano,
+		Conn:        conn,
+		imei:        &safeUint64{val: imei},
+		bucket:      &safeUint64{},
+		createdAt:   &safeTime{val: time.Now()},
+		lastReadAt:  &safeTime{val: time.Now()},
+		lastReading: &safeReading{},
+		logReading:  LogReadingWithUnixNano,
 
 		logInfo:  log.New(os.Stdout, "", 0),
 		logError: log.New(os.Stderr, "", 0),
