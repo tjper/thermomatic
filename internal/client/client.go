@@ -13,6 +13,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tjper/thermomatic/internal/common"
 	"github.com/tjper/thermomatic/internal/imei"
 )
 
@@ -35,10 +36,10 @@ const (
 type Client struct {
 	net.Conn
 
-	imei        Uint64Holder
-	bucket      Uint64Holder
-	createdAt   TimeHolder
-	lastReadAt  TimeHolder
+	imei        common.Uint64Holder
+	bucket      common.Uint64Holder
+	createdAt   common.TimeHolder
+	lastReadAt  common.TimeHolder
 	lastReading ReadingHolder
 	logReading  logReadingFunc
 
@@ -68,10 +69,10 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 
 	c := &Client{
 		Conn:        conn,
-		imei:        NewUint64Holder(imei),
-		bucket:      NewUint64Holder(0),
-		createdAt:   NewTimeHolder(time.Now()),
-		lastReadAt:  NewTimeHolder(time.Now()),
+		imei:        common.NewUint64Holder(imei),
+		bucket:      common.NewUint64Holder(0),
+		createdAt:   common.NewTimeHolder(time.Now()),
+		lastReadAt:  common.NewTimeHolder(time.Now()),
 		lastReading: NewReadingHolder(Reading{}),
 		logReading:  LogReadingWithUnixNano,
 
