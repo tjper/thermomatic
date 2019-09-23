@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/tjper/thermomatic/internal/imei"
@@ -46,9 +45,8 @@ type Client struct {
 	logInfo  *log.Logger
 	logError *log.Logger
 
-	once    sync.Once
-	toClose chan struct{}
-	done    chan struct{}
+	toShutdown chan struct{}
+	done       chan struct{}
 }
 
 // New initializes a Client object with the passed net.Conn. On success, the
@@ -78,8 +76,8 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 		logInfo:  log.New(os.Stdout, "", 0),
 		logError: log.New(os.Stderr, "", 0),
 
-		toClose: make(chan struct{}, 5),
-		done:    make(chan struct{}),
+		toShutdown: make(chan struct{}, 5),
+		done:       make(chan struct{}),
 	}
 
 	for _, option := range options {
@@ -94,7 +92,7 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 }
 
 func (c *Client) moderator() {
-	<-c.toClose
+	<-c.toShutdown
 	close(c.done)
 }
 
@@ -142,18 +140,16 @@ func (c *Client) watchReadFrequency(ctx context.Context, checkRate time.Duration
 		case <-ticker.C:
 			if time.Since(c.lastReadAt.get()) > (2 * time.Second) {
 				c.logError.Printf("[IMEI %d] No Readings for 2 seconds, Closing Client\n", c.IMEI())
-				c.Close()
+				c.shutdown()
 				return
 			}
 		}
 	}
 }
 
-// Close releases all Client sub-processes and resources.
-func (c *Client) Close() {
-	c.once.Do(func() {
-		c.toClose <- struct{}{}
-	})
+// toClose releases all Client sub-processes and resources.
+func (c *Client) shutdown() {
+	c.toShutdown <- struct{}{}
 }
 
 // IMEI is a getter for the client's IMEI.
@@ -178,6 +174,7 @@ func (c *Client) ProcessLogin(ctx context.Context) error {
 		select {
 		case <-timeout.C:
 			c.logError.Printf("[IMEI %d] Login Window Expired\n", c.IMEI())
+			c.shutdown()
 			return ErrClientLoginWindowExpired
 		case <-ctx.Done():
 			return ErrClientClose
@@ -192,9 +189,11 @@ func (c *Client) ProcessLogin(ctx context.Context) error {
 				continue
 			}
 			if err != nil {
+				c.shutdown()
 				return fmt.Errorf("[IMEI %d] failed to client.Login/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
 			}
 			if !bytes.Equal([]byte(login), b) {
+				c.shutdown()
 				return ErrClientUnauthorized
 			}
 			c.logInfo.Printf("[IMEI %d] Logged-In\n", c.IMEI())
@@ -226,6 +225,7 @@ func (c *Client) ProcessReadings(ctx context.Context) error {
 				continue
 			}
 			if err != nil {
+				c.shutdown()
 				return fmt.Errorf("[IMEI %d] failed to client.ProcessReadings/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
 			}
 			c.bucket.decrement()
