@@ -152,13 +152,12 @@ func (srv *Server) ListenAndServe() {
 					srv.logError.Println(err)
 					return
 				}
-				defer client.Close()
 
 				if srv.clientMap.Exists(client.IMEI()) {
 					srv.logError.Printf("Client %d is already connected\n", client.IMEI())
 					return
 				}
-				srv.clientMap.Store(client.IMEI(), client)
+				srv.clientMap.Store(client.IMEI(), *client)
 				defer srv.clientMap.Delete(client.IMEI())
 
 				if err := client.ProcessLogin(ctx); err != nil {

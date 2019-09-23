@@ -35,11 +35,11 @@ const (
 type Client struct {
 	net.Conn
 
-	imei        *safeUint64
-	bucket      *safeUint64
-	createdAt   *safeTime
-	lastReadAt  *safeTime
-	lastReading *safeReading
+	imei        Uint64Holder
+	bucket      Uint64Holder
+	createdAt   TimeHolder
+	lastReadAt  TimeHolder
+	lastReading ReadingHolder
 	logReading  logReadingFunc
 
 	logInfo  *log.Logger
@@ -68,11 +68,11 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 
 	c := &Client{
 		Conn:        conn,
-		imei:        &safeUint64{val: imei},
-		bucket:      &safeUint64{},
-		createdAt:   &safeTime{val: time.Now()},
-		lastReadAt:  &safeTime{val: time.Now()},
-		lastReading: &safeReading{},
+		imei:        NewUint64Holder(imei),
+		bucket:      NewUint64Holder(0),
+		createdAt:   NewTimeHolder(time.Now()),
+		lastReadAt:  NewTimeHolder(time.Now()),
+		lastReading: NewReadingHolder(Reading{}),
 		logReading:  LogReadingWithUnixNano,
 
 		logInfo:  log.New(os.Stdout, "", 0),
@@ -93,7 +93,7 @@ func New(ctx context.Context, conn net.Conn, options ...ClientOption) (*Client, 
 	return c, nil
 }
 
-func (c *Client) moderator() {
+func (c Client) moderator() {
 	<-c.toShutdown
 	close(c.done)
 }
@@ -111,7 +111,7 @@ func LogReadingWithUnixNano(logger *log.Logger, imei uint64, reading Reading) {
 
 // bucketIncrementer increments the workloadBalance field by 1 at the
 // rate passed as long as the balance is below max.
-func (c *Client) bucketIncrementer(ctx context.Context, rate time.Duration, max uint64) {
+func (c Client) bucketIncrementer(ctx context.Context, rate time.Duration, max uint64) {
 	ticker := time.NewTicker(rate)
 	defer ticker.Stop()
 	for {
@@ -121,8 +121,8 @@ func (c *Client) bucketIncrementer(ctx context.Context, rate time.Duration, max 
 		case <-c.done:
 			return
 		case <-ticker.C:
-			if v := c.bucket.get(); v < max {
-				c.bucket.set(v + 1)
+			if v := c.bucket.Get(); v < max {
+				c.bucket.Set(v + 1)
 			}
 		}
 	}
@@ -130,7 +130,7 @@ func (c *Client) bucketIncrementer(ctx context.Context, rate time.Duration, max 
 
 // watchReadFrequency ensures that a Reading has occurred within the last 2
 // seconds, or the Client connection is closed.
-func (c *Client) watchReadFrequency(ctx context.Context, checkRate time.Duration) {
+func (c Client) watchReadFrequency(ctx context.Context, checkRate time.Duration) {
 	ticker := time.NewTicker(checkRate)
 	defer ticker.Stop()
 	for {
@@ -140,7 +140,7 @@ func (c *Client) watchReadFrequency(ctx context.Context, checkRate time.Duration
 		case <-c.done:
 			return
 		case <-ticker.C:
-			if time.Since(c.lastReadAt.get()) > (2 * time.Second) {
+			if time.Since(c.lastReadAt.Get()) > (2 * time.Second) {
 				c.logError.Printf("[IMEI %d] No Readings for 2 seconds, Closing Client\n", c.IMEI())
 				c.shutdown()
 				return
@@ -150,24 +150,24 @@ func (c *Client) watchReadFrequency(ctx context.Context, checkRate time.Duration
 }
 
 // toClose releases all Client sub-processes and resources.
-func (c *Client) shutdown() {
+func (c Client) shutdown() {
 	c.toShutdown <- struct{}{}
 }
 
 // IMEI is a getter for the client's IMEI.
-func (c *Client) IMEI() uint64 {
-	return c.imei.get()
+func (c Client) IMEI() uint64 {
+	return c.imei.Get()
 }
 
 // LastReading is a getter for the Client's most recent reading.
-func (c *Client) LastReading() Reading {
-	return c.lastReading.get()
+func (c Client) LastReading() Reading {
+	return c.lastReading.Get()
 }
 
 // ProcessLogin authorizes the Client connection by ensuring TCP message
 // following IMEI message, has a "login" payload. On success, a nil error is
 // returned. On failure, a non-nil error is returned.
-func (c *Client) ProcessLogin(ctx context.Context) error {
+func (c Client) ProcessLogin(ctx context.Context) error {
 	timeout := time.NewTimer(time.Second)
 	defer timeout.Stop()
 
@@ -205,7 +205,7 @@ func (c *Client) ProcessLogin(ctx context.Context) error {
 }
 
 // ProcessReadings process incoming "Reading" TCP messages for the Client.
-func (c *Client) ProcessReadings(ctx context.Context) error {
+func (c Client) ProcessReadings(ctx context.Context) error {
 	b := make([]byte, 40)
 	var reading Reading
 	for {
@@ -215,7 +215,7 @@ func (c *Client) ProcessReadings(ctx context.Context) error {
 		case <-c.done:
 			return ErrClientClose
 		default:
-			if c.bucket.get() == 0 {
+			if c.bucket.Get() == 0 {
 				continue
 			}
 
@@ -230,20 +230,20 @@ func (c *Client) ProcessReadings(ctx context.Context) error {
 				c.shutdown()
 				return fmt.Errorf("[IMEI %d] failed to client.ProcessReadings/ReadFull\tb = % x, err = %s", c.IMEI(), b, err)
 			}
-			c.bucket.decrement()
+			c.bucket.Decrement()
 
 			if err := reading.Decode(b); err != nil {
 				c.logError.Printf(
 					"[IMEI %d] Failed to Client.ProcessReadings/decode\t b = %x, err = %s\n",
-					c.imei.get(),
+					c.imei.Get(),
 					b,
 					err)
 				continue
 			}
 
-			c.logReading(c.logError, c.imei.get(), reading)
-			c.lastReadAt.set(time.Now())
-			c.lastReading.set(reading)
+			c.logReading(c.logError, c.imei.Get(), reading)
+			c.lastReadAt.Set(time.Now())
+			c.lastReading.Set(reading)
 		}
 	}
 }

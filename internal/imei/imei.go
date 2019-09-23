@@ -17,7 +17,6 @@ var (
 
 const (
 	zero   = 48
-	nine   = 57
 	length = 15
 )
 
